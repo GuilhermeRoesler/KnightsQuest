@@ -1,0 +1,14 @@
+---
+description: Contexto do Knight's Quest — aponta para a skill detalhada do projeto
+alwaysApply: true
+---
+
+# Knight's Quest
+
+Jogo de plataformas 2D em pixel art (Godot 4.4 / GDScript). Nome no motor: **First Game**.
+
+Antes de implementar ou alterar mecânicas, cenas, scripts, input, áudio ou exportação:
+
+1. Ler e seguir `.cursor/skills/knights-quest/SKILL.md`
+2. Preservar o estilo pixel (filtro nearest) e a arquitetura atual (`scenes/` + `scripts/`)
+3. Não inventar sistemas fora do âmbito (menus, vidas, gamepad, multi-nível) sem pedido explícito
