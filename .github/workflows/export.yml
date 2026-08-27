@@ -1,0 +1,130 @@
+name: Export
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  GODOT_VERSION: "4.4"
+  EXPORT_NAME: KnightsQuest
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  export:
+    name: Export ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.4
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            preset: Windows Desktop
+            out_dir: build/windows
+            out_file: KnightsQuest.exe
+          - name: Linux
+            preset: Linux
+            out_dir: build/linux
+            out_file: KnightsQuest.x86_64
+          - name: Web
+            preset: Web
+            out_dir: build/web
+            out_file: index.html
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup export templates
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates
+          mkdir -v -p ~/.config
+          mv /root/.config/godot ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable \
+            ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          ls -la ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable | head
+
+      - name: Import project
+        run: godot --headless --import || true
+
+      - name: Export ${{ matrix.name }}
+        run: |
+          mkdir -v -p "${{ matrix.out_dir }}"
+          EXPORT_DIR="$(readlink -f "${{ matrix.out_dir }}")"
+          godot --headless --verbose --export-release "${{ matrix.preset }}" \
+            "${EXPORT_DIR}/${{ matrix.out_file }}"
+
+      - name: Upload build for release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.EXPORT_NAME }}-${{ matrix.name }}
+          path: ${{ matrix.out_dir }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Create GitHub Release
+    needs: export
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package release assets
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p release
+          for dir in artifacts/*/; do
+            name="$(basename "$dir")"
+            zip -r "release/${name}-${TAG}.zip" "$dir"
+          done
+          ls -lah release/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Knights Quest ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: release/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  pages:
+    name: Deploy GitHub Pages
+    needs: export
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download Web build
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.EXPORT_NAME }}-Web
+          path: site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
