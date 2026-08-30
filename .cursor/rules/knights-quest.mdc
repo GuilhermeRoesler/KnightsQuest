@@ -1,11 +1,11 @@
 ---
-description: Contexto do Knight's Quest — aponta para a skill detalhada do projeto
+description: Contexto do Knights Quest — aponta para a skill detalhada do projeto
 alwaysApply: true
 ---
 
-# Knight's Quest
+# Knights Quest
 
-Jogo de plataformas 2D em pixel art (Godot 4.4 / GDScript). Nome no motor: **First Game**.
+Jogo de plataformas 2D em pixel art (Godot 4.4 / GDScript). Nome no motor: **Knights Quest**.
 
 Antes de implementar ou alterar mecânicas, cenas, scripts, input, áudio ou exportação:
 

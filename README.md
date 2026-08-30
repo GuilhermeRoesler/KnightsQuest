@@ -1,4 +1,4 @@
-# First Game (Knight's Quest)
+# Knights Quest
 
 Um jogo de plataformas 2D em _pixel art_ desenvolvido no Godot Engine, onde controlas um cavaleiro numa aventura para recolher moedas e evitar perigos.
 

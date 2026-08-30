@@ -1,19 +1,19 @@
 ---
 name: knights-quest
 description: >-
-  Especificações e convenções do Knight's Quest (First Game): mecânicas,
+  Especificações e convenções do Knights Quest: mecânicas,
   scripts, cenas, input, áudio e critérios de aceitação. Usar ao desenvolver,
   corrigir ou estender o jogo Godot 4.4 / GDScript deste repositório.
 ---
 
-# Knight's Quest — Skill do projeto
+# Knights Quest — Skill do projeto
 
 ## Identidade
 
 | Campo | Valor |
 | --- | --- |
-| Nome no projeto | First Game |
-| Nome popular | Knight's Quest |
+| Nome no projeto | Knights Quest |
+| Nome popular | Knights Quest |
 | Motor | Godot 4.4 (Forward Plus) |
 | Linguagem | GDScript |
 | Género | Plataforma 2D / pixel art |
