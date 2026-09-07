@@ -30,6 +30,10 @@ jobs:
             preset: Linux
             out_dir: build/linux
             out_file: KnightsQuest.x86_64
+          - name: macOS
+            preset: macOS
+            out_dir: build/macos
+            out_file: KnightsQuest.zip
           - name: Web
             preset: Web
             out_dir: build/web
@@ -83,11 +87,24 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           mkdir -p release
-          for dir in artifacts/*/; do
-            name="$(basename "$dir")"
-            zip -r "release/${name}-${TAG}.zip" "$dir"
-          done
+
+          cp "artifacts/${EXPORT_NAME}-Windows/KnightsQuest.exe" \
+            "release/${EXPORT_NAME}-Windows-${TAG}.exe"
+
+          cp "artifacts/${EXPORT_NAME}-Linux/KnightsQuest.x86_64" \
+            "release/${EXPORT_NAME}-Linux-${TAG}.x86_64"
+
+          # macOS: Godot já empacota o .app num zip (estrutura obrigatória no macOS)
+          cp "artifacts/${EXPORT_NAME}-macOS/KnightsQuest.zip" \
+            "release/${EXPORT_NAME}-macOS-${TAG}.zip"
+
+          (
+            cd "artifacts/${EXPORT_NAME}-Web"
+            zip -r "../../release/${EXPORT_NAME}-Web-${TAG}.zip" .
+          )
+
           ls -lah release/
 
       - name: Publish release
@@ -98,7 +115,7 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
-          files: release/*.zip
+          files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
