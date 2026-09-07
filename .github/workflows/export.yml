@@ -65,14 +65,137 @@ jobs:
       - name: Upload build for release
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.EXPORT_NAME }}-${{ matrix.name }}
+          # Windows fica -unpatched: o ícone PE só é fiável com rcedit em runner Windows
+          name: ${{ env.EXPORT_NAME }}-${{ matrix.name }}${{ matrix.name == 'Windows' && '-unpatched' || '' }}
           path: ${{ matrix.out_dir }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Export Linux→Windows não embute o ícone no .exe; rcedit no Windows corrige o recurso PE
+  fix-windows-icon:
+    name: Fix Windows exe icon
+    needs: export
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.EXPORT_NAME }}-Windows-unpatched
+          path: build
+
+      - name: Download rcedit
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe" `
+            -OutFile rcedit-x64.exe
+
+      # rcedit reescreve o PE e parte um .pck já embutido — por isso o export
+      # sai com .exe+.pck separados; ícone primeiro, depois re-embutimos o pack.
+      - name: Apply project icon to exe files
+        shell: pwsh
+        run: |
+          $exes = Get-ChildItem -Path build -Filter *.exe -File
+          if (-not $exes) {
+            Write-Error "Nenhum .exe encontrado em build/"
+            exit 1
+          }
+          foreach ($exe in $exes) {
+            Write-Host "Aplicando icon.ico em $($exe.Name)"
+            & .\rcedit-x64.exe $exe.FullName --set-icon icon.ico
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "rcedit falhou em $($exe.Name) (exit $LASTEXITCODE)"
+              exit $LASTEXITCODE
+            }
+          }
+
+      - name: Re-embed PCK into main exe
+        shell: pwsh
+        run: |
+          # Anexar .pck ao .exe com footer Godot 4 (uint64 size + magic GDPC).
+          # O .pck standalone tem file_base absoluto; ao embutir é obrigatório
+          # PACK_REL_FILEBASE (bit 1), senão o motor lê offsets no sítio errado e
+          # falha com "Is the .pck file missing?" / ALERT!
+          $exePath = "build/KnightsQuest.exe"
+          $pckPath = "build/KnightsQuest.pck"
+          if (-not (Test-Path $exePath)) { Write-Error "Falta $exePath"; exit 1 }
+          if (-not (Test-Path $pckPath)) { Write-Error "Falta $pckPath"; exit 1 }
+
+          $pckBytes = [System.IO.File]::ReadAllBytes($pckPath)
+          if ($pckBytes.Length -lt 28) {
+            Write-Error "PCK demasiado pequeno ($($pckBytes.Length) bytes)"
+            exit 1
+          }
+          $magicHead = [Text.Encoding]::ASCII.GetString($pckBytes, 0, 4)
+          if ($magicHead -ne 'GDPC') {
+            Write-Error "PCK sem magic GDPC no início (viu '$magicHead')"
+            exit 1
+          }
+          # flags @ offset 20 (após magic + version + maj/min/patch)
+          $flags = [BitConverter]::ToUInt32($pckBytes, 20) -bor 2 # PACK_REL_FILEBASE
+          [BitConverter]::GetBytes([uint32]$flags).CopyTo($pckBytes, 20)
+
+          $pckSize = [uint64]$pckBytes.Length
+          $tmpPath = "build/KnightsQuest.embedded.exe"
+          $out = [System.IO.File]::Create($tmpPath)
+          try {
+            $inExe = [System.IO.File]::OpenRead($exePath)
+            try {
+              $inExe.CopyTo($out)
+            } finally {
+              $inExe.Dispose()
+            }
+            $out.Write($pckBytes, 0, $pckBytes.Length)
+            $bw = New-Object System.IO.BinaryWriter $out
+            $bw.Write([uint64]$pckSize)
+            $bw.Write([uint32]0x43504447) # "GDPC" little-endian
+            $bw.Flush()
+          } finally {
+            $out.Dispose()
+          }
+
+          Move-Item -Force $tmpPath $exePath
+          Remove-Item -Force $pckPath
+          Remove-Item -Force "build/KnightsQuest.console.exe" -ErrorAction SilentlyContinue
+
+          # Sanity: footer GDPC + flag REL_FILEBASE no PCK embutido
+          $fs = [System.IO.File]::OpenRead($exePath)
+          try {
+            $fs.Seek(-4, 'End') | Out-Null
+            $magic = New-Object byte[] 4
+            [void]$fs.Read($magic, 0, 4)
+            $fs.Seek(-12 - [int64]$pckSize + 20, 'End') | Out-Null
+            $flagBuf = New-Object byte[] 4
+            [void]$fs.Read($flagBuf, 0, 4)
+            $embeddedFlags = [BitConverter]::ToUInt32($flagBuf, 0)
+          } finally {
+            $fs.Dispose()
+          }
+          $magicStr = [Text.Encoding]::ASCII.GetString($magic)
+          if ($magicStr -ne 'GDPC') {
+            Write-Error "Footer GDPC em falta (viu '$magicStr'). Embed inválido."
+            exit 1
+          }
+          if (($embeddedFlags -band 2) -eq 0) {
+            Write-Error "PACK_REL_FILEBASE em falta (flags=$embeddedFlags). Embed inválido."
+            exit 1
+          }
+          Write-Host "Embed OK: size=$((Get-Item $exePath).Length) footer=$magicStr pckSize=$pckSize flags=$embeddedFlags"
+          Get-ChildItem build | Format-Table Name, Length
+
+      - name: Upload patched Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.EXPORT_NAME }}-Windows
+          path: build/KnightsQuest.exe
           if-no-files-found: error
           retention-days: 7
 
   release:
     name: Create GitHub Release
-    needs: export
+    needs: [export, fix-windows-icon]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -89,6 +212,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
+          # Remove o build Windows sem ícone (só o artifact patchado vai para a release)
+          rm -rf "artifacts/${EXPORT_NAME}-Windows-unpatched"
 
           cp "artifacts/${EXPORT_NAME}-Windows/KnightsQuest.exe" \
             "release/${EXPORT_NAME}-Windows-${TAG}.exe"
